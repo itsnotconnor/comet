@@ -34,11 +34,11 @@ const _AHT20_SLAVE_ADDR: u16 = 0x38 << 1 | 0x1;//0x38 with 1 bit for read == 0x7
 const AHT20_SLAVE_ADDR_7BIT: u16 = 0x38; // RPI I2C requires 7 bit addr WITHOUT read/write bit
 // Sensor Commands
 const AHT20_INIT_CMD:   u8 = 0xBE;//
-const _AHT20_MEAS_CMD:   u8 = 0xAC;//
+const AHT20_MEAS_CMD:   u8 = 0xAC;//
 const _AHT20_RST_CMD:    u8 = 0xBA;//
 // Masks
 const _AHT20_BUSY_MSK:   u8 = 0x80;// Busy?
-const _AHT20_CAL_EN_MSK: u8 = 0x08;// Calibrated?
+const AHT20_CAL_EN_MSK: u8 = 0x08;// Calibrated?
 // Sync word
 const SYNC_BYTE_UPPER: u8 = 0xFE;
 const SYNC_BYTE_LOWER: u8 = 0xCA;
@@ -117,6 +117,13 @@ fn fill_packet(pkt : &mut Packet, pkt_data_0 : u16, pkt_data_1: u16,  pkt_data_2
 
 fn aht20_init( i2c_bus: &mut I2c ) {
 
+    /*
+    Device requires at least 40ms since power on to start writing.
+    This is here to ensure that is always true regardless of application
+    */
+    thread::sleep(Duration::from_millis(40));
+    
+
     // Set the I2C slave address to the device we're communicating with.
     i2c_bus.set_slave_address(AHT20_SLAVE_ADDR_7BIT).unwrap();
     //     Ok() => {
@@ -131,23 +138,75 @@ fn aht20_init( i2c_bus: &mut I2c ) {
 
     // Init the AHT20 temperature and humidity sensor.
     println!(" Init CMD: {}", AHT20_INIT_CMD);
-    //i2c_bus.write(&[AHT20_INIT_CMD]).unwrap();
-    //         Ok(u)=>{
-    //            println!("AHT20 write success: Bytes written={}",u);
-    //         },
-    //         Err(msg)=>{
-    //            println!("{}",msg);
-    //         }
+    i2c_bus.write(&[AHT20_INIT_CMD]).unwrap();
+    //     Ok(u)=>{
+    //         println!("AHT20 write success: Bytes written={}",u);
+    //     },
+    //     Err(msg)=>{
+    //         println!("{}",msg);
+    //     }
     // };
 
-    // Timing for init sequence
-    //thread::sleep(Duration::from_millis(100));
-    
-    // Check CAL bit
-    //i2c.write_read()
 
+    //Check CAL bit
+    let mut read_buffer : [u8 ; 7] = [0x0,0x0,0x0,0x0,0x0,0x0,0x0];
+
+    i2c_bus.write_read( &[0x71], &mut read_buffer);
+    //Status byte is byte 0
+    
+    if ((read_buffer[0] & AHT20_CAL_EN_MSK) >> 3) != 0{
+        //Calibrated
+        println!( "cal {:?}", read_buffer[0]);
+    }
+    else{
+        //Not calibrated
+        println!( "uncal {:?}", read_buffer[0]);
+    }
     // If we reach the end of the function, we can return OK
     //Ok(())
+}
+
+fn aht20_measure( i2c_bus: &mut I2c){//}, temp_buffer : & mut u16, hum_buffer : & mut u16, crc_buffer : & mut u8){
+    //
+    let mut read_buffer : [u8 ; 7] = [0x0,0x0,0x0,0x0,0x0,0x0,0x0];
+
+    //Attempt read sensor
+    i2c_bus.block_write(0x70,&[AHT20_MEAS_CMD,0x00 ,0x33] );
+    //Wait for measurement to complete
+    thread::sleep(Duration::from_millis(80));
+    //Read bytes
+    i2c_bus.block_read(0x71, &mut read_buffer);
+    
+    //println!("sense : {:?} ", read_buffer);
+    // Example output::
+    //          [status, RH[0], RH[1], RH_t, TMP[0], TMP[1], CRC]
+    // sense :  [156,    139,   174,   117,  246,    241,    88] 
+    // sense :  [156,    139,   170,   69,   246,    207,    81] 
+
+
+    let mut humidity : u32   = read_buffer[1].into();                          //20-bit raw humidity data
+    humidity <<= 8;
+    humidity  |= (read_buffer[2] as u32);
+    humidity <<= 4;
+    humidity  |= ((read_buffer[3] as u32) >> 4);
+    //print!("raw {}  -> ", humidity);
+    println!(" RH(%) = {}", 100.0 * ((humidity as f32) / 1048576.0) ); //(f32) 2^20 == 1048576.0
+
+    let mut temperature : u32 = (read_buffer[3] & 0x0F).into();                //20-bit raw temperature data
+    temperature <<= 8;
+    temperature  |= (read_buffer[4] as u32);
+    temperature <<= 8;
+    temperature  |= (read_buffer[5] as u32);
+    //print!("raw {}  -> ", temperature);
+    println!(" T(C*) = {}",  (((temperature as f32) / 1048576.0)  * 200.0) - 50.0 ); //(f32) 2^20 == 1048576.0
+
+
+    
+
+    
+
+
+
 }
 
 
@@ -160,16 +219,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut rp_i2c: I2c = I2c::new()?;
     let mut uart: Uart = Uart::new(115_200, Parity::None, 8, 1)?; //Standard Baud
     let mut _delay : Delay = Delay::new(); //DelayMs
-
-    // println!(" Slave Addr: {}", AHT20_SLAVE_ADDR);
-    // // Set the I2C slave address to the device we're communicating with.
-    // rp_i2c.set_slave_address(AHT20_SLAVE_ADDR)?;
-
-    // // Init the AHT20 temperature and humidity sensor.
-    // println!(" Init CMD: {}", AHT20_INIT_CMD);
-    // rp_i2c.write(&[AHT20_INIT_CMD])?;
-    // // Check CAL bit
-    // //i2c.write_read()
 
     aht20_init(&mut rp_i2c); // have to specify '&mut' for i2c_bus 
 
@@ -188,13 +237,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         thread::sleep(Duration::from_millis(500));
 
-        //Attempt read sensor
-        //rp_i2c.block_write(AHT20_MEAS_CMD,&[ 0x00 ,0x33] )?;
-
-        // let aht20_measurement: u16 = aht20.measure(&mut delay).unwrap();
-        // println!("temperature: {:.2}C", aht20_measurement.temperature);
-        // println!("humidity: {:.2}%", aht20_measurement.humidity);
-
         let mut my_backpack : Packet = Packet::new();
 
         let temp: u16 = random::<u16>();
@@ -206,20 +248,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Convert the struct to a JSON string.
         let serialized = serde_json::to_string(&my_backpack).unwrap();
         // Prints JSON serialized 
-        println!("serialized = {}", serialized);
+        //println!("serialized = {}", serialized);
 
         // Convert the JSON string back to a struct.
         let deserialized: Packet = serde_json::from_str(&serialized).unwrap();
         // Prints Packet deserialized 
-        println!("deserialized = {:?}", deserialized);
+        //println!("deserialized = {:?}", deserialized);
 
         /* Use bytes serializer (bincode) */
         let encoded: Vec<u8> = bincode::serialize(&my_backpack).unwrap();
-        println!("encoded [{:?}]", encoded);
+        //println!("encoded [{:?}]", encoded);
         
         // Deserialize a slice of the whole encoded vector (denoted by [start..end] )
         let decoded: Packet = bincode::deserialize(&encoded[..]).unwrap();
-        println!("decoded [{:?}]", decoded);
+        //println!("decoded [{:?}]", decoded);
 
         //Send Data from random buffer
         let mut write_buffer: [u8; 2] = [ 0xab, rand::random::<u8>() ];
@@ -228,7 +270,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let write_vec_buffer: &[u8] = &encoded[..];
         let sent_vec_bytes : usize = uart.write( write_vec_buffer )?;
         //Total bytes sent
-        println!("Sent bytes : {} \n\n", sent_bytes + sent_vec_bytes);
+        //println!("Sent bytes : {} \n\n", sent_bytes + sent_vec_bytes);
+        aht20_measure(&mut rp_i2c);
 
     }
 
