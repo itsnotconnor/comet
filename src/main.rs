@@ -274,12 +274,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         /* Use JSON serializer  */
         // Convert the struct to a JSON string.
-        let serialized = serde_json::to_string(&my_backpack).unwrap();
+        //let serialized = serde_json::to_string(&my_backpack).unwrap();
         // Prints JSON serialized 
         //println!("serialized = {}", serialized);
 
         // Convert the JSON string back to a struct.
-        let deserialized: Packet = serde_json::from_str(&serialized).unwrap();
+        //let deserialized: Packet = serde_json::from_str(&serialized).unwrap();
         // Prints Packet deserialized 
         //println!("deserialized = {:?}", deserialized);
 
