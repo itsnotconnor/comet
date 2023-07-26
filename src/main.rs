@@ -2,6 +2,10 @@
 @author cnelson
 Raspberry Pi Zero project
 
+
+Project to read from a AHT20 Temperature sensor, 
+convert to degrees C and relative humidity, 
+
 */
 
 /* Crates & Libraries */
@@ -177,12 +181,22 @@ fn aht20_measure( i2c_bus: &mut I2c){//}, temp_buffer : & mut u16, hum_buffer : 
     //Read bytes
     i2c_bus.block_read(0x71, &mut read_buffer);
     
-    //println!("sense : {:?} ", read_buffer);
+    println!("sense : {:?} ", read_buffer);
     // Example output::
     //          [status, RH[0], RH[1], RH_t, TMP[0], TMP[1], CRC]
     // sense :  [156,    139,   174,   117,  246,    241,    88] 
     // sense :  [156,    139,   170,   69,   246,    207,    81] 
 
+
+/*
+sense : [156, 192, 51, 101, 170, 210, //129] 
+        [9C, C0, 33, 65, AA, D2, //81]
+ RH(%) = 75.07839
+ T(C*) = 20.840836
+crc_aht20 : 81
+ crc_new : 4E
+//computed result - 0x5C
+ */
 
     let mut humidity : u32   = read_buffer[1].into();                          //20-bit raw humidity data
     humidity <<= 8;
@@ -202,11 +216,25 @@ fn aht20_measure( i2c_bus: &mut I2c){//}, temp_buffer : & mut u16, hum_buffer : 
 
 
     
+    //Finally, verify with CRC8 bytes
 
-    
+    /* /
+    "After receiving six bytes, the next byte is the CRC check
+    data, the user can read it as needed, if the receiving end
+    needs CRC check, then send it after receiving the sixth byte
+    ACK response, otherwise NACK is sent out, CRC initial value
+    is 0XFF, CRC8 check polynomial is:"
+
+    CRC[7:0]=1+x^4 + x^5 + x^8
+    b100110001 == 0x131 =? 8 bit = 0x31
+    */
+
+    let crc_aht20 : u8 = read_buffer[6]; 
+    let mut crc_new : u8 = 0x00;//0xFF
+    println!("crc_aht20 : {:X}" , crc_aht20);
 
 
-
+    println!(" crc_new : {:X}" , crc_new);
 }
 
 

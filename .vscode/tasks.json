@@ -1,27 +1,33 @@
-// {
-// 	"version": "2.0.0",
-// 	"tasks": [
-// 		{
-// 			"type": "shell",
-// 			"command": "cargo build --release --target=arm-unknown-linux-gnueabihf",
-// 			"problemMatcher": [
-// 				"$rustc",
-// 				"$rust-panic"
-// 			],
-// 			"group": "build",
-// 			"label": "rust: cargo build rpi"
-// 		},
-// 		{
-// 			"type": "cargo",
-// 			"command": "clean",
-// 			//"args" : ["cargo clean"],
-// 			"problemMatcher": [
-// 				"$rustc",
-// 				"$rust-panic"
-// 			],
-// 			//"group": "clean",
-// 			"label": "rust: test cargo clean"
-// 		}
-// 	]
-// }
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cargo",
+			"command": "build",
+			"args": [
+				"--release",
+				"--target=arm-unknown-linux-gnueabihf"
+			],
+			
+			"problemMatcher": [
+				"$rustc",
+				"$rust-panic"
+			],
+			"group": "build",
+			"label": "rust: cargo build rpi"
+		},
+		{
+			"type": "cargo",
+			"command": "clean",
+			//"args" : ["cargo clean"],
+			"problemMatcher": [
+				"$rustc",
+				"$rust-panic"
+			],
+			//"group": "clean",
+			"label": "rust: test cargo clean"
+		}
+	]
+}
+
 

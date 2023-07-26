@@ -1,5 +1,10 @@
 
+
+use crc_any::CRC;
+
 /* CRC-16 (CCITT) Implementations */
+
+const CRC_START : u16 = 0x1D0F; // CRC16-XMODEM uses 0x0000 start // CRC16-AUG-CCIT uses 0x1D0F start
 
 const TABLE : [u16 ; 256]
  = [0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7, 0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
@@ -25,7 +30,7 @@ CRC-16 (CCITT) implemented with a precomputed lookup table
 */
 
 pub fn crc16_table( data_buffer : &[u8] ) -> u16 {
-    let mut crc : u16 = 0x1D0F; // CRC16-XMODEM uses 0x0000 start // CRC16-AUG-CCIT uses 0x1D0F start
+    let mut crc : u16 = CRC_START;
 
     for byte in data_buffer.iter() {
         let index : usize = ((crc >> 8) ^ (*byte as u16)) as usize;
@@ -40,7 +45,7 @@ pub fn crc16_table( data_buffer : &[u8] ) -> u16 {
 CRC-16 (CCITT) implemented without pre-computed values
  */
 pub fn crc16_manual(msg: &[u8]) -> u16 {
-    let mut crc: u16 = 0x1D0F;
+    let mut crc: u16 = CRC_START; 
     for byte in msg.iter() {
         let mut x = ((crc >> 8) ^ (*byte as u16)) & 255;
         x ^= x >> 4;
@@ -48,6 +53,51 @@ pub fn crc16_manual(msg: &[u8]) -> u16 {
     }
     return crc;
 }
+
+
+/* CRC 8 */
+pub fn crc8_manual(){
+
+
+    let mut crc_test: CRC = CRC::create_crc( 0x31,  8, 0xFF, 0x00, false);
+
+    crc_test.digest(b"hello");
+    
+    assert_eq!([71, 245, 138].to_vec(), crc_test.get_crc_vec_be());
+    assert_eq!("0x47F58A", &crc_test.to_string());
+    
+    // for b in 0 .. 5{
+    //     let x = read_buffer[b];//as u16
+    
+    //     let mut data: u8  = crc_new ^ x;
+    
+    //     let polynomial : u8 = 0x31;//0x131 is u16
+    //     for i in 0 .. 8{
+    //         //Check MSB 1 
+    //         if data & 0x80 != 0{
+    //             // print!(" data : u16 {:b} ^ " , data);
+    //             //print!(" data : {} {:b}" , i, data);
+    //             data = data ^ polynomial;
+    //             //println!(" ^ {:b} == {:b}" , polynomial, data);
+            
+    //         }
+    //         //Debug only
+    //         // else{
+    //         //     //println!(" data : {} {:b}" , i, data);
+    //         // }
+    //         //Shift
+    //         data = data << 1;
+    //     }
+    
+    //     //
+    //     //println!(" data : u16  {}" , data);
+    //     crc_new = data;
+    
+    // }
+
+
+}
+
 
 
 /* Unit Tests */
