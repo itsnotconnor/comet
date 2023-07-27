@@ -3,7 +3,7 @@
 use crc8::*;
 
 /* CRC-16 (CCITT) Implementations */
-
+const AHT20_CRC_POLYNOMIAL : u8 = 0x31;
 const CRC_START : u16 = 0x1D0F; // CRC16-XMODEM uses 0x0000 start // CRC16-AUG-CCIT uses 0x1D0F start
 
 const TABLE : [u16 ; 256]
@@ -55,15 +55,35 @@ pub fn crc16_manual(data_buffer: &[u8]) -> u16 {
 }
 
 
-/* CRC 8 */
-pub fn crc8_manual(data_buffer : &[u8])-> u8{
+/* CRC 8 table implementation for Aht20 */
+pub fn crc8_table(data_buffer : &[u8])-> u8{
 
-    /* CRC 8 */
-    let mut crc8 = Crc8::create_lsb(0x31);
+    /* CRC 8 for MSB data */
+    let mut crc8 = Crc8::create_msb(AHT20_CRC_POLYNOMIAL); //TODO - improve table computation every time fn is called
     let buffer_len = data_buffer.len() as i32;
     let mut crc_new = crc8.calc(&data_buffer, buffer_len, 0xFF);
-    println!("crc8: {}", crc_new);
+
     return crc_new;
+}
+
+pub fn crc8_aht20(aht20_buffer : &[u8]) -> u8{
+    /* assume aht20 buffer: {status, RH, RH, RH+T, T, T, CRC} and MSB */
+    let mut crc : u8 = 0xFF;
+
+    //Byte 0 (status) to Byte 5 (temp)
+    for i in 0..6{
+        crc ^= aht20_buffer[i];
+        //Count down for each bit
+        for bit in (0..8).rev(){
+            if (crc & 0x80 != 0){
+                crc = (crc << 1) ^ AHT20_CRC_POLYNOMIAL;
+            }
+            else{
+                crc = crc << 1
+            }
+        }
+    }
+    return crc;
 }
 
 /* Unit Tests */
@@ -93,5 +113,23 @@ mod tests {
         let expected_crc : u16 = 0x6B3B;
 
         assert_eq!(crc16_manual(&input_bytes), expected_crc);
+    }
+
+    #[test]
+    fn test_crc_8_table() {
+        //  [156,    139,   170,   69,   246,    207,    crc->81] 
+        let input_bytes : [u8;6] = [156,    139,   170,   69,   246,    207];
+        let expected_crc : u8 = 81;
+
+        assert_eq!(crc8_table(&input_bytes), expected_crc);
+    }
+
+    #[test]
+    fn test_crc_8_aht20() {
+        //  [156,    139,   170,   69,   246,    207,    crc->81] (last byte crc unused in this fn)
+        let input_bytes : [u8;7] = [156,    139,   170,   69,   246,    207,    81];
+        let expected_crc : u8 = 81;
+
+        assert_eq!(crc8_aht20(&input_bytes), expected_crc);
     }
 }

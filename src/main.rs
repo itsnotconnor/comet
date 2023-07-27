@@ -10,8 +10,7 @@ convert to degrees C and relative humidity,
 
 /* Crates & Libraries */
 use std::error::Error;
-use std::thread;
-use std::time::Duration;
+use std::{thread, time};
 
 use rand::prelude::*;
 
@@ -76,34 +75,42 @@ impl Aht20Data {
     }
     fn collect(&mut self, buffer : &[u8] ) -> Result<(), ()>{
 
-        
         //Check buffer is correct length
         if buffer.len() == 7{
 
-            let mut humidity : u32   = buffer[1].into(); //20-bit raw humidity data -> u32
-            humidity <<= 8;
-            humidity  |= buffer[2] as u32;
-            humidity <<= 4;
-            humidity  |= (buffer[3] as u32) >> 4;
-            self.u32_humidity = humidity;
-            self.f32_humidty = 100.0 * ((humidity as f32) / 1048576.0);//(f32) 2^20 == 1048576.0
-            // println!("Raw Humidity = {},  RH(%) = {}", humidity,  100.0 * ((humidity as f32) / 1048576.0)); 
-        
-            let mut temperature : u32 = (buffer[3] & 0x0F).into(); //20-bit raw temperature data -> u32
-            temperature <<= 8;
-            temperature  |= buffer[4] as u32;
-            temperature <<= 8;
-            temperature  |= buffer[5] as u32;
-            self.u32_temperature = temperature;
-            self.f32_temperature =  (((temperature as f32) / 1048576.0)  * 200.0) - 50.0;//(f32) 2^20 == 1048576.0
-            //println!("Raw Temperature = {}, T(C*) = {}", temperature, (((temperature as f32) / 1048576.0)  * 200.0) - 50.0); 
+            let checked_crc = crc::crc8_aht20(&buffer);
 
+            //If crc check passes, proceed to fill the rest of the data
+            if(checked_crc == buffer[6]){
+                self.checksum = checked_crc;
+                self.status = buffer[0];
 
-            let mut data_buff = &buffer[0..5];
-            let checked_crc = crc::crc8_manual(&data_buff);
-            println!(" crc::crc8_manual == {} , aht20_crc == {}", checked_crc, buffer[6]);
-
-            Ok(())
+                let mut humidity : u32   = buffer[1].into(); //20-bit raw humidity data -> u32
+                humidity <<= 8;
+                humidity  |= buffer[2] as u32;
+                humidity <<= 4;
+                humidity  |= (buffer[3] as u32) >> 4;
+                self.u32_humidity = humidity;
+                self.f32_humidty = 100.0 * ((humidity as f32) / 1048576.0);//(f32) 2^20 == 1048576.0
+                // println!("Raw Humidity = {},  RH(%) = {}", humidity,  100.0 * ((humidity as f32) / 1048576.0)); 
+            
+                let mut temperature : u32 = (buffer[3] & 0x0F).into(); //20-bit raw temperature data -> u32
+                temperature <<= 8;
+                temperature  |= buffer[4] as u32;
+                temperature <<= 8;
+                temperature  |= buffer[5] as u32;
+                self.u32_temperature = temperature;
+                self.f32_temperature =  (((temperature as f32) / 1048576.0)  * 200.0) - 50.0;//(f32) 2^20 == 1048576.0
+                //println!("Raw Temperature = {}, T(C*) = {}", temperature, (((temperature as f32) / 1048576.0)  * 200.0) - 50.0); 
+                
+                //Successful data collection, return Ok
+                Ok(())
+            }
+            //Otherwise, inform of failure
+            else{
+                println!("CRC Failed! crc::crc8_aht20 == {} , aht20_crc == {}", checked_crc, buffer[6]);
+                Err(())
+            }
         }
         else{
             println!("Expected buffer.len() == 7, instead buffer.len() == {}", buffer.len());
@@ -198,7 +205,7 @@ fn aht20_init( i2c_bus: &mut I2c ) -> Result<(), ()>{
     Device requires at least 40ms since power on to start writing.
     This is here to ensure that is always true regardless of application
     */
-    thread::sleep(Duration::from_millis(40));
+    thread::sleep(time::Duration::from_millis(40));
     
     // Set the I2C slave address to the device we're communicating with (MUST BE u16!)
     match i2c_bus.set_slave_address(AHT20_SLAVE_ADDR_7BIT){
@@ -245,7 +252,7 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
     //Attempt read sensor
     i2c_bus.block_write(AHT20_WRITE_CMD,&[AHT20_MEAS_CMD,0x00 ,0x33] );
     //Wait for measurement to complete
-    thread::sleep(Duration::from_millis(80));
+    thread::sleep(time::Duration::from_millis(80));
     //Read bytes
     i2c_bus.block_read(AHT20_READ_CMD, &mut read_buffer);
     //Put into Aht20Data struct
@@ -256,6 +263,7 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
             return Ok(aht20_data);
         }
         Err(()) => {
+            println!("Error in aht20_measure -> Aht20Data::collect(...) ");
             return Err(());
         }
     }
@@ -265,6 +273,7 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Hello Worlds!");
     println!("Blinking LED on {}.", DeviceInfo::new()?.model());
+    println!{"{:?}", time::Instant::now()};
 
     let mut pin: rppal::gpio::OutputPin = Gpio::new()?.get(GPIO_LED)?.into_output();
     let mut rp_i2c: I2c = I2c::new()?;
@@ -287,11 +296,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         //Blinky boi
         pin.set_high();
         println!("State is High: {}", pin.is_set_high());
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(time::Duration::from_millis(500));
         pin.set_low();
         println!("State is Low: {}", pin.is_set_low());
-        thread::sleep(Duration::from_millis(500));
-
+        thread::sleep(time::Duration::from_millis(500));
+        //Time
+        println!{"{:?}", time::Instant::now()};
         //AHT20
         match aht20_measure(&mut rp_i2c){
             Ok(my_aht20) =>{
@@ -319,16 +329,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 //Send data from encoded raw bytes from sliced vector
                 let write_vec_buffer: &[u8] = &encoded[..];
                 let sent_vec_bytes : usize = uart.write( write_vec_buffer )?;
-
             },
             Err(()) =>{
                 //Unable to read sensor, continue
                 continue;
-                
             }
         };
-
-
     }
 
 
