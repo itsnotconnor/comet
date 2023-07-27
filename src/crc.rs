@@ -1,6 +1,6 @@
 
 
-use crc_any::CRC;
+use crc8::*;
 
 /* CRC-16 (CCITT) Implementations */
 
@@ -39,14 +39,14 @@ pub fn crc16_table( data_buffer : &[u8] ) -> u16 {
     }
     // important, crc must stay 16bits all the way through
     return crc;
-    }
+}
 
 /*
 CRC-16 (CCITT) implemented without pre-computed values
  */
-pub fn crc16_manual(msg: &[u8]) -> u16 {
+pub fn crc16_manual(data_buffer: &[u8]) -> u16 {
     let mut crc: u16 = CRC_START; 
-    for byte in msg.iter() {
+    for byte in data_buffer.iter() {
         let mut x = ((crc >> 8) ^ (*byte as u16)) & 255;
         x ^= x >> 4;
         crc = (crc << 8) ^ (x << 12) ^ (x << 5) ^ x;
@@ -56,49 +56,15 @@ pub fn crc16_manual(msg: &[u8]) -> u16 {
 
 
 /* CRC 8 */
-pub fn crc8_manual(){
+pub fn crc8_manual(data_buffer : &[u8])-> u8{
 
-
-    let mut crc_test: CRC = CRC::create_crc( 0x31,  8, 0xFF, 0x00, false);
-
-    crc_test.digest(b"hello");
-    
-    assert_eq!([71, 245, 138].to_vec(), crc_test.get_crc_vec_be());
-    assert_eq!("0x47F58A", &crc_test.to_string());
-    
-    // for b in 0 .. 5{
-    //     let x = read_buffer[b];//as u16
-    
-    //     let mut data: u8  = crc_new ^ x;
-    
-    //     let polynomial : u8 = 0x31;//0x131 is u16
-    //     for i in 0 .. 8{
-    //         //Check MSB 1 
-    //         if data & 0x80 != 0{
-    //             // print!(" data : u16 {:b} ^ " , data);
-    //             //print!(" data : {} {:b}" , i, data);
-    //             data = data ^ polynomial;
-    //             //println!(" ^ {:b} == {:b}" , polynomial, data);
-            
-    //         }
-    //         //Debug only
-    //         // else{
-    //         //     //println!(" data : {} {:b}" , i, data);
-    //         // }
-    //         //Shift
-    //         data = data << 1;
-    //     }
-    
-    //     //
-    //     //println!(" data : u16  {}" , data);
-    //     crc_new = data;
-    
-    // }
-
-
+    /* CRC 8 */
+    let mut crc8 = Crc8::create_lsb(0x31);
+    let buffer_len = data_buffer.len() as i32;
+    let mut crc_new = crc8.calc(&data_buffer, buffer_len, 0xFF);
+    println!("crc8: {}", crc_new);
+    return crc_new;
 }
-
-
 
 /* Unit Tests */
 
