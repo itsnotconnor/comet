@@ -11,6 +11,9 @@ convert to degrees C and relative humidity,
 /* Crates & Libraries */
 use std::error::Error;
 use std::{thread, time};
+use std::io::{self, Write};
+
+use serialport::{available_ports, SerialPort};
 
 use rand::prelude::*;
 
@@ -225,14 +228,23 @@ fn aht20_init( i2c_bus: &mut I2c ) -> Result<(), ()>{
             println!("AHT20 write success: Bytes written = {}",u);
         },
         Err(msg)=>{
-            println!("{}",msg);
+            println!("Unable to init AHT20 {}",msg);
+            return Err(());
         }
     };
 
     //Check CAL bit
     let mut read_buffer : [u8 ; 7] = [0x0,0x0,0x0,0x0,0x0,0x0,0x0];
 
-    i2c_bus.write_read( &[AHT20_READ_CMD], &mut read_buffer);
+    match i2c_bus.write_read( &[AHT20_READ_CMD], &mut read_buffer){
+        Ok(())=>{
+            println!("AHT20 i2c.write_read success");
+        },
+        Err(msg)=>{
+            println!("AHT20 i2c.write_read failed! {}",msg);
+            return Err(());
+        }
+    };
     //Status byte is byte 0
     if ((read_buffer[0] & AHT20_CAL_EN_MSK) >> 3) != 0{
         //Calibrated
@@ -250,11 +262,27 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
     //Default buffer
     let mut read_buffer : [u8 ; 7] = [0x0,0x0,0x0,0x0,0x0,0x0,0x0];
     //Attempt read sensor
-    i2c_bus.block_write(AHT20_WRITE_CMD,&[AHT20_MEAS_CMD,0x00 ,0x33] );
+    match i2c_bus.block_write(AHT20_WRITE_CMD,&[AHT20_MEAS_CMD,0x00 ,0x33]){
+        Ok(())=>{
+            //pass
+        },
+        Err(msg)=>{
+            println!("Error in aht20_measure -> i2c.block_write(...) : {}", msg);
+            return Err(());
+        }
+    };
     //Wait for measurement to complete
     thread::sleep(time::Duration::from_millis(80));
     //Read bytes
-    i2c_bus.block_read(AHT20_READ_CMD, &mut read_buffer);
+    match i2c_bus.block_read(AHT20_READ_CMD, &mut read_buffer){
+        Ok(())=>{
+            //pass
+        },
+        Err(msg )=>{
+            println!("Error in aht20_measure -> i2c.block_read(...) : {}", msg);
+            return Err(());
+        }
+    };
     //Put into Aht20Data struct
     let mut aht20_data : Aht20Data = Aht20Data::new();
     match Aht20Data::collect(&mut aht20_data, &read_buffer){
@@ -266,7 +294,7 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
             println!("Error in aht20_measure -> Aht20Data::collect(...) ");
             return Err(());
         }
-    }
+    };
 }
 
 
@@ -288,8 +316,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             panic!("Unable to initialize AHT20 sensor!")
         }
     }
-    //Uart configure
+    // Uart configure
     uart.set_write_mode(false)?;
+
+    // println!("Num ports available: {}", available_ports()?.len());
+
+    // Pi Pico serial port
+    let port_name = "/dev/ttyACM0";
+    let baud_rate = 115200;
+
+    let mut port = serialport::new(port_name, baud_rate)
+        .timeout(time::Duration::from_millis(100)).open()?;
+
 
     //Forever
     loop { 
@@ -302,7 +340,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         thread::sleep(time::Duration::from_millis(500));
         //Time
         println!{"{:?}", time::Instant::now()};
-        //AHT20
+        //AHT20 
         match aht20_measure(&mut rp_i2c){
             Ok(my_aht20) =>{
                 //Successful sensor read, okay to create packet
@@ -320,21 +358,36 @@ fn main() -> Result<(), Box<dyn Error>> {
                 //println!("encoded [{:?}]", encoded);
                 
                 // Deserialize a slice of the whole encoded vector (denoted by [start..end] )
-                let decoded: Packet = bincode::deserialize(&encoded[..]).unwrap();
+                let _decoded: Packet = bincode::deserialize(&encoded[..]).unwrap();
                 //println!("decoded [{:?}]", decoded);
 
                 //Send Data from random buffer
                 let mut write_buffer: [u8; 2] = [ 0xab, rand::random::<u8>() ];
-                let sent_bytes = uart.write(&mut write_buffer)?;
+                let _sent_bytes = uart.write(&mut write_buffer)?;
                 //Send data from encoded raw bytes from sliced vector
                 let write_vec_buffer: &[u8] = &encoded[..];
-                let sent_vec_bytes : usize = uart.write( write_vec_buffer )?;
+                let _sent_vec_bytes : usize = uart.write( write_vec_buffer )?;
+
             },
             Err(()) =>{
                 //Unable to read sensor, continue
                 continue;
             }
         };
+        /* Serial */
+        let mut serial_buf: Vec<u8> = vec![0; 30];
+        //println!("Receiving data on {} at {} baud:", &port_name, &baud_rate);
+        match port.read(serial_buf.as_mut_slice()) {
+            Ok(t) => io::stdout().write_all(&serial_buf[..t]).unwrap(),
+            Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
+            Err(e) => eprintln!("{:?}", e),
+        }
+        /* show data */
+        print!("\n[");
+        for byte in serial_buf{
+            print!("{:X} ",byte);
+        }
+        println!("]");
     }
 
 
