@@ -388,8 +388,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let data_4: u16 = random::<u16>();
 
                         // TODO send over socket
-                        fill_packet(&mut my_backpack, my_aht20.u32_temperature, my_aht20.u32_humidity, ktype,  data_4, pico_onboard_temp,);
-                        
+                        fill_packet(&mut my_backpack, my_aht20.u32_temperature,  ktype,my_aht20.u32_humidity,  data_4, pico_onboard_temp,);
+                        /* Use bytes serializer (bincode) */
+                        let encoded: Vec<u8> = bincode::serialize(&my_backpack).unwrap();
+                        /* Example: serialized:
+                             [202, 254, 71, 120, 5, 0, 196, 192, 11, 0, 0, 0, 0, 29, 231, 57, 3, 3, 203, 154] 
+                             [202, 254] [71, 120, 5, 0] [196, 192, 11, 0] [0, 0, 0, 29] [231, 57] [3, 3] [203, 154] 
+                        */
+                        println!("serialized: {:?}",encoded);
+
                     },
                     Err(()) =>{
                         //Unable to read sensor, continue TODO handle errror
@@ -404,12 +411,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),
         }
-
-
-
-
     }
-
-
 }
 
