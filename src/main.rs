@@ -3,8 +3,15 @@
 Raspberry Pi Zero project
 
 
-Project to read from a AHT20 Temperature sensor, 
-convert to degrees C and relative humidity, 
+Project to read sensors from various sources 
+and send data to a server
+
+Device 1: Aht20 Temperature sensor
+    - Temperature C
+    - Humidity RH
+Device 2: Pi Pico 
+    - Onboard Temperature C
+    - Max31856 with K-Type Thermistor Temperature C 
 
 */
 
@@ -50,7 +57,7 @@ const AHT20_CAL_EN_MSK: u8 = 0x08;// Calibrated?
 const SYNC_BYTE_UPPER: u8 = 0xFE;
 const SYNC_BYTE_LOWER: u8 = 0xCA;
 // Static packet length
-const PACKET_LENGTH: u8 = 16;
+const PACKET_LENGTH: u8 = 20;
 
 
 //
@@ -131,10 +138,11 @@ Sensor Packet - Minimal Implementation
 
 Packet Structure
 - sync_bytes   u16 (Sync Word)    
-- data_0      u32 (Temperature)
-- data_1      u32 (Humidity)
-- data_2      u16 (Time)
-- data_3      u16 (Other)
+- data_0      u32 (Aht20 Temperature)
+- data_1      u32 (Ktype Thermistor Temp)
+- data_2      u32 (Humidity)
+- data_3      u16 (Time)
+- data_4      u16 (Pico Onboard temp)
 - crc_16_byte u16 (CRC)
 
  */
@@ -142,11 +150,13 @@ Packet Structure
 #[repr(packed)]
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct Packet {
+    /* Generic data packet containing sync bytes, u32 & u16 data, and a crc */
     sync: u16,
     data_0: u32,
     data_1: u32,
-    data_2: u16,
+    data_2: u32,
     data_3: u16,
+    data_4: u16,
     crc: u16,
 }
 
@@ -158,8 +168,7 @@ impl Packet {
     }
 }
 
-
-fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32,  pkt_data_2: u16, pkt_data_3: u16){
+fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32, pkt_data_2: u32,  pkt_data_3: u16, pkt_data_4: u16){
     /* Packet: 
      - pass ref of mut Packet
      - modify what is mut Packet with fill data
@@ -172,22 +181,26 @@ fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32,  pkt_data_2
     pkt.data_1 = pkt_data_1;
     pkt.data_2 = pkt_data_2;
     pkt.data_3 = pkt_data_3;
+    pkt.data_4 = pkt_data_4;
 
 
     // Create a buffer of bytes for CRC computation (TODO make this better)
     let mut buffer : [u8 ; (PACKET_LENGTH-2) as usize] = [
                                             //SYNC
                                             pkt.sync.to_le_bytes()[0],pkt.sync.to_le_bytes()[1], 
-                                            //Temp
+                                            //Aht20 Temp
                                             pkt_data_0.to_le_bytes()[0], pkt_data_0.to_le_bytes()[1],
                                             pkt_data_0.to_le_bytes()[2], pkt_data_0.to_le_bytes()[3],
-                                            //Hum
+                                            //Ktype Temp
                                             pkt_data_1.to_le_bytes()[0], pkt_data_1.to_le_bytes()[1],
                                             pkt_data_1.to_le_bytes()[2], pkt_data_1.to_le_bytes()[3],
-                                            //Time TODO
+                                            //Hum
                                             pkt_data_2.to_le_bytes()[0], pkt_data_2.to_le_bytes()[1],
-                                            //Other
-                                            pkt_data_3.to_le_bytes()[0], pkt_data_3.to_le_bytes()[1]
+                                            pkt_data_2.to_le_bytes()[2], pkt_data_2.to_le_bytes()[3],
+                                            //Time TODO
+                                            pkt_data_3.to_le_bytes()[0], pkt_data_3.to_le_bytes()[1],
+                                            //Pico onboard temp
+                                            pkt_data_4.to_le_bytes()[0], pkt_data_4.to_le_bytes()[1]
                                             //Do not include default CRC in calc
                                             ];
                                             
@@ -203,7 +216,6 @@ fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32,  pkt_data_2
 
 
 fn aht20_init( i2c_bus: &mut I2c ) -> Result<(), ()>{
-
     /*
     Device requires at least 40ms since power on to start writing.
     This is here to ensure that is always true regardless of application
@@ -299,6 +311,7 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
 
 
 fn main() -> Result<(), Box<dyn Error>> {
+    /** INITIALIZATION **/
     println!("Hello Worlds!");
     println!("Blinking LED on {}.", DeviceInfo::new()?.model());
     println!{"{:?}", time::Instant::now()};
@@ -307,7 +320,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut rp_i2c: I2c = I2c::new()?;
     let mut uart: Uart = Uart::new(115_200, Parity::None, 8, 1)?; //Standard Baud
 
-    //I2c device init
+    /* I2c device init */
     match aht20_init(&mut rp_i2c){
         Ok(()) =>{
             println!("Init success!");
@@ -316,78 +329,85 @@ fn main() -> Result<(), Box<dyn Error>> {
             panic!("Unable to initialize AHT20 sensor!")
         }
     }
-    // Uart configure
+    /* Serial wire UART configure */
     uart.set_write_mode(false)?;
 
-    // println!("Num ports available: {}", available_ports()?.len());
-
-    // Pi Pico serial port
+    /* Pi Pico serial port */
     let port_name = "/dev/ttyACM0";
     let baud_rate = 115200;
-
     let mut port = serialport::new(port_name, baud_rate)
-        .timeout(time::Duration::from_millis(100)).open()?;
+        .timeout(time::Duration::from_millis(500)).open()?;
 
-
-    //Forever
+    /** LOOP FOREVER **/
     loop { 
-        //Blinky boi
-        pin.set_high();
-        println!("State is High: {}", pin.is_set_high());
-        thread::sleep(time::Duration::from_millis(500));
-        pin.set_low();
-        println!("State is Low: {}", pin.is_set_low());
-        thread::sleep(time::Duration::from_millis(500));
-        //Time
+        /* Current Time */
         println!{"{:?}", time::Instant::now()};
-        //AHT20 
-        match aht20_measure(&mut rp_i2c){
-            Ok(my_aht20) =>{
-                //Successful sensor read, okay to create packet
-                // Aht20Data.
-                //Packet
-                let mut my_backpack : Packet = Packet::new();
 
-                let data_3: u16 = random::<u16>();
-                let data_4: u16 = random::<u16>();
-
-                fill_packet(&mut my_backpack, my_aht20.u32_temperature, my_aht20.u32_humidity, data_3, data_4);
-
-                /* Use bytes serializer (bincode) */
-                let encoded: Vec<u8> = bincode::serialize(&my_backpack).unwrap();
-                //println!("encoded [{:?}]", encoded);
-                
-                // Deserialize a slice of the whole encoded vector (denoted by [start..end] )
-                let _decoded: Packet = bincode::deserialize(&encoded[..]).unwrap();
-                //println!("decoded [{:?}]", decoded);
-
-                //Send Data from random buffer
-                let mut write_buffer: [u8; 2] = [ 0xab, rand::random::<u8>() ];
-                let _sent_bytes = uart.write(&mut write_buffer)?;
-                //Send data from encoded raw bytes from sliced vector
-                let write_vec_buffer: &[u8] = &encoded[..];
-                let _sent_vec_bytes : usize = uart.write( write_vec_buffer )?;
-
-            },
-            Err(()) =>{
-                //Unable to read sensor, continue
-                continue;
-            }
-        };
-        /* Serial */
-        let mut serial_buf: Vec<u8> = vec![0; 30];
+        /* Serial Buffer for read response */
+        let mut serial_buf: Vec<u8> = vec![0; 14];
         //println!("Receiving data on {} at {} baud:", &port_name, &baud_rate);
         match port.read(serial_buf.as_mut_slice()) {
-            Ok(t) => io::stdout().write_all(&serial_buf[..t]).unwrap(),
+            /*
+            If we get a successful read from the pico, 
+            then continue the program, otherwise throw 
+            an Err and retry!
+             */
+            Ok(t) => {
+                //Write serial port bytes to buffer
+                io::stdout().write_all(&serial_buf[..t]).unwrap();
+                /* Debug print data */
+                // print!("\n[");
+                // for byte in &serial_buf{
+                //     print!("{:X} ",byte);
+                // }
+                // println!("]");
+                /* Check Framing */
+                if(serial_buf[0] != 0xCA || serial_buf[1] != 0xFE || serial_buf[13] != 0xA){
+                    println!("Framing error : moving on to next packet...");
+                    continue;
+                }
+                /* Read the AHT20 */
+                match aht20_measure(&mut rp_i2c){
+                    Ok(my_aht20) =>{
+                        //Packet
+                        let mut my_backpack : Packet = Packet::new();
+
+                        let mut pico_onboard_temp: u16 = (serial_buf[6] & 0xFF).into(); //
+                        pico_onboard_temp <<= 8;
+                        pico_onboard_temp  |= serial_buf[7] as u16;
+
+                        let mut ktype : u32 = (serial_buf[8] & 0xFF).into(); //
+                        ktype <<= 8;
+                        ktype  |= serial_buf[9] as u32;
+                        ktype <<= 8;
+                        ktype  |= serial_buf[10] as u32;
+                        ktype <<= 8;
+                        ktype  |= serial_buf[11] as u32;
+
+                        // TODO
+                        let data_4: u16 = random::<u16>();
+
+                        // TODO send over socket
+                        fill_packet(&mut my_backpack, my_aht20.u32_temperature, my_aht20.u32_humidity, ktype,  data_4, pico_onboard_temp,);
+                        
+                    },
+                    Err(()) =>{
+                        //Unable to read sensor, continue TODO handle errror
+                        continue;
+                    }
+                };
+                //Blinky boi to let us know data has been recv
+                pin.toggle();
+                println!("State is : {}", pin.is_set_high());
+            //End Ok()
+            },
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),
         }
-        /* show data */
-        print!("\n[");
-        for byte in serial_buf{
-            print!("{:X} ",byte);
-        }
-        println!("]");
+
+
+
+
     }
 
 
