@@ -41,6 +41,7 @@ mod crc;
 
 /* Constants */
 const GPIO_LED: u8 = 17; //RPI Zero W LED gpio 17
+const GPIO_DATA_REQ: u8 = 27; //gpio 27
 
 // Device Addr Select
 const AHT20_SLAVE_ADDR_7BIT: u16 = 0x38; // RPI I2C requires 7 bit addr WITHOUT read/write bit
@@ -317,6 +318,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!{"{:?}", time::Instant::now()};
 
     let mut pin: rppal::gpio::OutputPin = Gpio::new()?.get(GPIO_LED)?.into_output();
+    let mut data_req_pin : rppal::gpio::OutputPin = Gpio::new()?.get(GPIO_DATA_REQ)?.into_output();
+    data_req_pin.set_high();
+
     let mut rp_i2c: I2c = I2c::new()?;
     let mut uart: Uart = Uart::new(115_200, Parity::None, 8, 1)?; //Standard Baud
 
@@ -336,10 +340,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let port_name = "/dev/ttyACM0";
     let baud_rate = 115200;
     let mut port = serialport::new(port_name, baud_rate)
-        .timeout(time::Duration::from_millis(500)).open()?;
+        .timeout(time::Duration::from_millis(250)).open()?;
 
     /** LOOP FOREVER **/
     loop { 
+
+        /* Send Data Request - active low */
+        data_req_pin.set_low();
+
         /* Current Time */
         println!{"{:?}", time::Instant::now()};
 
@@ -411,6 +419,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),
         }
+        /* Reset data request pin high */
+        data_req_pin.set_high();
+
+        /* Sleep */
+        thread::sleep(time::Duration::from_millis(2000));
+    
     }
+
+
 }
 
