@@ -38,6 +38,8 @@ use serde::{Deserialize, Serialize};
 /* Local Imports*/
 mod crc;
 
+mod sock;
+
 
 /* Constants */
 const GPIO_LED: u8 = 17; //RPI Zero W LED gpio 17
@@ -324,6 +326,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut rp_i2c: I2c = I2c::new()?;
     let mut uart: Uart = Uart::new(115_200, Parity::None, 8, 1)?; //Standard Baud
 
+    // Socket Client instantiate
+    // sock::client_main();
+
+
     /* I2c device init */
     match aht20_init(&mut rp_i2c){
         Ok(()) =>{
@@ -350,6 +356,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         /* Current Time */
         println!{"{:?}", time::Instant::now()};
+
+        /*
+        Packet Len = 13
+        Composition = [ SYNC_BYTE_LOWER, SYNC_BYTE_UPPER, 
+                    COUNTER_BYTE_0, COUNTER_BYTE_1, COUNTER_BYTE_2, COUNTER_BYTE_3, 
+                    TEMP_ONBOARD_BYTE_LOWER, TEMP_ONBOARD_BYTE_UPPER, 
+                    THERMO_BYTE_0, THERMO_BYTE_1, THERMO_BYTE_2, THERMO_BYTE_3, 
+                    END_OF_LINE_0A
+                    ]
+        */
 
         /* Serial Buffer for read response */
         let mut serial_buf: Vec<u8> = vec![0; 14];
@@ -392,7 +408,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         ktype <<= 8;
                         ktype  |= serial_buf[11] as u32;
 
-                        // TODO
+                        // TODO time stamp
                         let data_4: u16 = random::<u16>();
 
                         // TODO send over socket
