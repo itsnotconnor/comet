@@ -18,7 +18,7 @@ pub struct WebSocks{
     web_client_sock : WebSocket<MaybeTlsStream<TcpStream>>
 }
 
-pub impl WebSocks{
+impl WebSocks{
     /// A WebSocket echo server
     pub fn _server_main() {
         // env_logger::init();
