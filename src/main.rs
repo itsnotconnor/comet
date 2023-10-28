@@ -17,8 +17,12 @@ Device 2: Pi Pico
 
 /* Crates & Libraries */
 use std::error::Error;
+use std::f32::consts::E;
+use std::time::SystemTime;
 use std::{thread, time};
+
 use std::io::{self, Write};
+use std::env;
 
 use serialport::{available_ports, SerialPort};
 
@@ -60,7 +64,7 @@ const AHT20_CAL_EN_MSK: u8 = 0x08;// Calibrated?
 const SYNC_BYTE_UPPER: u8 = 0xFE;
 const SYNC_BYTE_LOWER: u8 = 0xCA;
 // Static packet length
-const PACKET_LENGTH: u8 = 20;
+const PACKET_LENGTH: u8 = 22;
 
 
 //
@@ -136,18 +140,52 @@ impl Aht20Data {
     
 }
 
+
+/*
+Pico Packet - Minimal Implementation
+
+Packet Len = 13
+Packet Structure = 
+- SYNC_BYTE_LOWER, SYNC_BYTE_UPPER, 
+- COUNTER_BYTE_0, COUNTER_BYTE_1, COUNTER_BYTE_2, COUNTER_BYTE_3, 
+- TEMP_ONBOARD_BYTE_LOWER, TEMP_ONBOARD_BYTE_UPPER, 
+- THERMO_BYTE_0, THERMO_BYTE_1, THERMO_BYTE_2, THERMO_BYTE_3, 
+- END_OF_LINE_0A
+
+*/
+// pico data why
+// ca fe 
+// 87 c8 00 00 
+// f8 02 
+// 66 00 00 00 0d 
+// 0a 
+
+// ca fe 
+// 8a c8 00 00 
+// f8 02 
+// 00 00 00 00 0d 
+// 0a
+
+// ca fe 
+// d9 c8 00 00 
+// f6 02 
+// 66 00 00 00 0d 
+// 0a 
+
+
+
+
 /*
 Sensor Packet - Minimal Implementation
 
 Packet Structure
-- sync_bytes   u16 (Sync Word)    
+- sync_bytes  u16 (Sync Word)    
 - data_0      u32 (Aht20 Temperature)
 - data_1      u32 (Ktype Thermistor Temp)
 - data_2      u32 (Humidity)
-- data_3      u16 (Time)
+- data_3      u32 (Time)
 - data_4      u16 (Pico Onboard temp)
 - crc_16_byte u16 (CRC)
-
  */
 
 #[repr(packed)]
@@ -158,7 +196,7 @@ struct Packet {
     data_0: u32,
     data_1: u32,
     data_2: u32,
-    data_3: u16,
+    data_3: f32,
     data_4: u16,
     crc: u16,
 }
@@ -171,7 +209,7 @@ impl Packet {
     }
 }
 
-fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32, pkt_data_2: u32,  pkt_data_3: u16, pkt_data_4: u16){
+fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32, pkt_data_2: u32,  pkt_data_3: f32, pkt_data_4: u16){
     /* Packet: 
      - pass ref of mut Packet
      - modify what is mut Packet with fill data
@@ -200,8 +238,9 @@ fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32, pkt_data_2:
                                             //Hum
                                             pkt_data_2.to_le_bytes()[0], pkt_data_2.to_le_bytes()[1],
                                             pkt_data_2.to_le_bytes()[2], pkt_data_2.to_le_bytes()[3],
-                                            //Time TODO
+                                            //Time 
                                             pkt_data_3.to_le_bytes()[0], pkt_data_3.to_le_bytes()[1],
+                                            pkt_data_3.to_le_bytes()[2], pkt_data_3.to_le_bytes()[3],
                                             //Pico onboard temp
                                             pkt_data_4.to_le_bytes()[0], pkt_data_4.to_le_bytes()[1]
                                             //Do not include default CRC in calc
@@ -214,9 +253,6 @@ fn fill_packet(pkt : &mut Packet, pkt_data_0 : u32, pkt_data_1: u32, pkt_data_2:
     //If we do not return explicitly, deconstructor will give back borrowed mut Packet
     //pkt;
 }
-
-
-
 
 fn aht20_init( i2c_bus: &mut I2c ) -> Result<(), ()>{
     /*
@@ -315,9 +351,24 @@ fn aht20_measure( i2c_bus: &mut I2c) -> Result<Aht20Data, ()>{
 
 fn main() -> Result<(), Box<dyn Error>> {
     /** INITIALIZATION **/
+    let args: Vec<String> = env::args().collect();
+
+    //args[0] - Binary name
+    //dbg!(&args[0]);
+    //args[1] - First Argument - Client Address
+    let mut address = "";
+    if args.len() > 1{
+        address = &args[1];
+    }
+    else{
+        //Default Addr : "ws://localhost:3012/socket"
+        address = "ws://localhost:3012/socket";
+    }
+
     println!("Hello Worlds!");
-    println!("Blinking LED on {}.", DeviceInfo::new()?.model());
-    println!{"{:?}", time::Instant::now()};
+    //dbg!("Blinking LED on {}.", DeviceInfo::new()?.model());
+    let sys_time = time::SystemTime::now();
+    println!("{:?}", sys_time);
 
     let mut pin: rppal::gpio::OutputPin = Gpio::new()?.get(GPIO_LED)?.into_output();
     let mut data_req_pin : rppal::gpio::OutputPin = Gpio::new()?.get(GPIO_DATA_REQ)?.into_output();
@@ -327,7 +378,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut uart: Uart = Uart::new(115_200, Parity::None, 8, 1)?; //Standard Baud
 
     // Socket Client instantiate
-    // sock::client_main();
+    let mut my_client_socket = sock::client_register(address);
+    let mut payload : String = String::from("let it rip");
+    sock::client_message(&mut my_client_socket, payload);
 
 
     /* I2c device init */
@@ -350,25 +403,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     /** LOOP FOREVER **/
     loop { 
+        /* Reset data request pin high (if not already set) */
+        data_req_pin.set_high();
+        /* Sleep device for N ms */
+        thread::sleep(time::Duration::from_millis(1500));
 
+        port.clear(serialport::ClearBuffer::All)?;
         /* Send Data Request - active low */
         data_req_pin.set_low();
-
-        /* Current Time */
-        println!{"{:?}", time::Instant::now()};
-
-        /*
-        Packet Len = 13
-        Composition = [ SYNC_BYTE_LOWER, SYNC_BYTE_UPPER, 
-                    COUNTER_BYTE_0, COUNTER_BYTE_1, COUNTER_BYTE_2, COUNTER_BYTE_3, 
-                    TEMP_ONBOARD_BYTE_LOWER, TEMP_ONBOARD_BYTE_UPPER, 
-                    THERMO_BYTE_0, THERMO_BYTE_1, THERMO_BYTE_2, THERMO_BYTE_3, 
-                    END_OF_LINE_0A
-                    ]
-        */
+        thread::sleep(time::Duration::from_millis(500));
 
         /* Serial Buffer for read response */
-        let mut serial_buf: Vec<u8> = vec![0; 14];
+        let mut serial_buf: Vec<u8> = vec![0; 13]; //
         //println!("Receiving data on {} at {} baud:", &port_name, &baud_rate);
         match port.read(serial_buf.as_mut_slice()) {
             /*
@@ -377,72 +423,78 @@ fn main() -> Result<(), Box<dyn Error>> {
             an Err and retry!
              */
             Ok(t) => {
-                //Write serial port bytes to buffer
-                io::stdout().write_all(&serial_buf[..t]).unwrap();
-                /* Debug print data */
-                // print!("\n[");
-                // for byte in &serial_buf{
-                //     print!("{:X} ",byte);
-                // }
-                // println!("]");
+                // //We want to set reset data ready pin to not get garbage bytes on the serial input buffer
+                // data_req_pin.set_high();
+
                 /* Check Framing */
-                if(serial_buf[0] != 0xCA || serial_buf[1] != 0xFE || serial_buf[13] != 0xA){
-                    println!("Framing error : moving on to next packet...");
+                if(serial_buf[0] != 0xCA || serial_buf[1] != 0xFE || serial_buf[12] != 0xD){//why is this 0xD not 0xA
+                    println!("Framing error: \n{:?}\nmoving on to next packet...", serial_buf );
                     continue;
                 }
+
                 /* Read the AHT20 */
                 match aht20_measure(&mut rp_i2c){
                     Ok(my_aht20) =>{
+
+                        println!("Pico Serial Buffer : \n{:?}\n", serial_buf );
                         //Packet
                         let mut my_backpack : Packet = Packet::new();
 
-                        let mut pico_onboard_temp: u16 = (serial_buf[6] & 0xFF).into(); //
-                        pico_onboard_temp <<= 8;
-                        pico_onboard_temp  |= serial_buf[7] as u16;
+                        let mut pico_count : u32 = (serial_buf[5] & 0xFF).into(); //
+                        pico_count <<= 8;
+                        pico_count  |= serial_buf[4] as u32;
+                        pico_count <<= 8;
+                        pico_count  |= serial_buf[3] as u32;
+                        pico_count <<= 8;
+                        pico_count  |= serial_buf[2] as u32;
+                        println!("Pico Counter: {}", pico_count);
 
-                        let mut ktype : u32 = (serial_buf[8] & 0xFF).into(); //
-                        ktype <<= 8;
-                        ktype  |= serial_buf[9] as u32;
+                        // Stuff bytes into data types for packet
+                        let mut pico_onboard_temp: u16 = (serial_buf[7] & 0xFF).into(); //
+                        pico_onboard_temp <<= 8;
+                        pico_onboard_temp  |= serial_buf[6] as u16;
+
+                        let mut ktype : u32 = (serial_buf[11] & 0xFF).into(); //
                         ktype <<= 8;
                         ktype  |= serial_buf[10] as u32;
                         ktype <<= 8;
-                        ktype  |= serial_buf[11] as u32;
+                        ktype  |= serial_buf[9] as u32;
+                        ktype <<= 8;
+                        ktype  |= serial_buf[8] as u32;
 
-                        // TODO time stamp
-                        let data_4: u16 = random::<u16>();
+                        let f32_ktype: f32 = f32::from_be_bytes([serial_buf[11], serial_buf[10], serial_buf[9], serial_buf[8]]);
+                        println!("Ktype f32_le : {} ", f32_ktype);
 
-                        // TODO send over socket
-                        fill_packet(&mut my_backpack, my_aht20.u32_temperature,  ktype,my_aht20.u32_humidity,  data_4, pico_onboard_temp,);
-                        /* Use bytes serializer (bincode) */
-                        let encoded: Vec<u8> = bincode::serialize(&my_backpack).unwrap();
-                        /* Example: serialized:
-                             [202, 254, 71, 120, 5, 0, 196, 192, 11, 0, 0, 0, 0, 29, 231, 57, 3, 3, 203, 154] 
-                             [202, 254] [71, 120, 5, 0] [196, 192, 11, 0] [0, 0, 0, 29] [231, 57] [3, 3] [203, 154] 
-                        */
-                        println!("serialized: {:?}",encoded);
+                        /* Elapsed Time (seconds) */
+                        let elapsed = time::SystemTime::now().duration_since(sys_time).expect("Elapsed time err");
+                        let elapsed_time_stamp: f32 = elapsed.as_secs_f32();
+                        
+                        fill_packet(&mut my_backpack, my_aht20.u32_temperature,  ktype,my_aht20.u32_humidity,  elapsed_time_stamp, pico_onboard_temp);
+                        
+                        /* Use JSON serializer  */
+                        let serialized = serde_json::to_string(&my_backpack).unwrap();
+                        //dbg!("JSON serialized: {:?}",serialized);
+                        sock::client_message(&mut my_client_socket,  serialized);
+
+                        // //Blinky boi is here to let us know data acquisition & transfer has been successful 
+                        // pin.set_high();
+                        // thread::sleep(time::Duration::from_millis(100));
+                        // pin.set_low();
+                        // //dbg!("State is : {}", pin.is_set_high());
 
                     },
                     Err(()) =>{
-                        //Unable to read sensor, continue TODO handle errror
+                        //Unable to read sensor, continue 
+                        println!("Packet Error: Unable to AHT20 read sensor");
                         continue;
                     }
                 };
-                //Blinky boi to let us know data has been recv
-                pin.toggle();
-                println!("State is : {}", pin.is_set_high());
             //End Ok()
             },
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
-            Err(e) => eprintln!("{:?}", e),
+            Err(e) => eprintln!("Unhandled Error: {:?}", e),
         }
-        /* Reset data request pin high */
-        data_req_pin.set_high();
-
-        /* Sleep */
-        thread::sleep(time::Duration::from_millis(2000));
-    
     }
-
 
 }
 
